@@ -1,0 +1,64 @@
+{
+    "backends": {
+        "strata": {
+            "name": "Strata (local Qwen MoE)",
+            "base_url": "http://127.0.0.1:8080/v1",
+            "api_key": "YOUR_API_KEY_HERE",
+            "model": "swift-1.5-iq3_s"
+        },
+        "kindi": {
+            "name": "Kindi (local MoE)",
+            "base_url": "http://127.0.0.1:8093/v1",
+            "api_key": "YOUR_API_KEY_HERE",
+            "model": "bonsai2-27b"
+        },
+        "custom": {
+            "name": "Custom OpenAI Compatible",
+            "base_url": "http://localhost:1234/v1",
+            "api_key": "",
+            "model": "local-model"
+        },
+        "openai": {
+            "name": "OpenAI",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "YOUR_API_KEY_HERE",
+            "model": "gpt-4o-mini"
+        },
+        "deepseek": {
+            "name": "DeepSeek API",
+            "base_url": "https://api.deepseek.com/v1",
+            "api_key": "YOUR_API_KEY_HERE",
+            "model": "deepseek-chat"
+        },
+        "mistral": {
+            "name": "Mistral API",
+            "base_url": "https://api.mistral.ai/v1",
+            "api_key": "YOUR_API_KEY_HERE",
+            "model": "mistral-large-latest"
+        },
+        "gemini": {
+            "name": "Google Gemini",
+            "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+            "api_key": "YOUR_API_KEY_HERE",
+            "model": "gemini-2.0-flash"
+        },
+        "openrouter": {
+            "name": "OpenRouter",
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key": "YOUR_API_KEY_HERE",
+            "model": "openai/gpt-4o-mini"
+        },
+        "groq": {
+            "name": "Groq",
+            "base_url": "https://api.groq.com/openai/v1",
+            "api_key": "YOUR_API_KEY_HERE",
+            "model": "llama-3.3-70b-versatile"
+        },
+        "together": {
+            "name": "Together AI",
+            "base_url": "https://api.together.xyz/v1",
+            "api_key": "YOUR_API_KEY_HERE",
+            "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+        }
+    }
+}
