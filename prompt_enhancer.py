@@ -70,12 +70,17 @@ def suggest_options(llm: LLMBackend, prompt: str, chosen: List[str], step: int,
     chosen_txt = ", ".join(chosen) if chosen else "(nothing yet)"
     system = (
         "You are refining an image prompt step by step. "
+        "Each step builds on the choices already made: every option must be "
+        "consistent with, and compatible with, everything chosen so far. "
+        "Never contradict an earlier choice (e.g. no 'photograph' after "
+        "'oil painting', no subject that replaces the previous one). "
         "Reply with a plain list only - no numbering, no commentary."
     )
     user = (
         f"Image idea: \"{prompt}\"\n"
-        f"Chosen so far: {chosen_txt}\n\n"
-        f"Refinement step {step}. Propose {num_suggestions} options for the next refinement.\n"
+        f"Chosen so far (all of these must remain true together): {chosen_txt}\n\n"
+        f"Refinement step {step}: propose {num_suggestions} options that build on "
+        f"and stay consistent with the choices above.\n"
         f"{detail}\n\n"
         f"Reply with exactly {num_suggestions} options, one per line."
     )
