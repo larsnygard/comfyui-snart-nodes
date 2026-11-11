@@ -203,11 +203,11 @@ class SnartPromptBuilder:
                 "num_steps": ("INT", {"default": 3, "min": 1, "max": 8, "step": 1}),
                 "num_suggestions": ("INT", {"default": 2, "min": 1, "max": 8, "step": 1}),
                 "broadness": (["simple", "specific", "broad"], {"default": "simple"}),
-                "choices": ("STRING", {"multiline": True, "default": "", "placeholder": "Auto-filled as you pick each step."}),
                 "llm_backend": (get_backend_options(), {"default": "kindi", "tooltip": get_backend_tooltip()}),
                 "api_endpoint": ("STRING", {"default": "http://localhost:1234/v1"}),
                 "model_name": ("STRING", {"default": "", "placeholder": "blank = auto-detect"}),
                 "temperature": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 2.0, "step": 0.05}),
+                "choices": ("STRING", {"multiline": True, "default": "", "placeholder": "Your picks, one per line - editable before running."}),
             }
         }
 
@@ -216,8 +216,8 @@ class SnartPromptBuilder:
     FUNCTION = "build"
     CATEGORY = "Snart"
 
-    def build(self, prompt, num_steps, num_suggestions, broadness, choices,
-              llm_backend, api_endpoint, model_name, temperature):
+    def build(self, prompt, num_steps, num_suggestions, broadness,
+              llm_backend, api_endpoint, model_name, temperature, choices):
         prompt = (prompt or "").strip()
         picks = [c for c in (choices or "").splitlines() if c.strip()]
         if not prompt and not picks:

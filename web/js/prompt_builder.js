@@ -1,9 +1,10 @@
 /**
  * Expanding dropdowns for the Snart Prompt Builder.
  *
- * Clicking 🎲 Start fetches step 1's options and adds a "Step 1" dropdown.
- * Picking from it appends the choice to "choices" and adds a "Step 2" dropdown,
- * and so on until num_steps is reached. The node grows one dropdown per step.
+ * - A persistent "📊 Progress" line shows how many steps are chosen.
+ * - A "🎲 Step N" checkbox sits beside each step: when checked, that step
+ *   auto-picks a random option as soon as it is populated (and cascades on).
+ * - 🎲 Start fetches step 1; picking a step reveals the next dropdown.
  */
 
 import { app } from "../../../scripts/app.js";
@@ -72,6 +73,42 @@ function currentChoices(node) {
     .filter(Boolean);
 }
 
+function updateProgress(node) {
+  const prog = getWidget(node, "📊 Progress");
+  if (!prog) return;
+  const numSteps = Number(widgetValue(node, "num_steps") || 0);
+  const chosen = currentChoices(node).length;
+  prog.value = `${chosen} / ${numSteps} steps chosen`;
+  node.graph?.setDirtyCanvas(true, true);
+}
+
+// keep the 🎲 Step N checkboxes in sync with num_steps (preserving their values)
+function syncRandomToggles(node) {
+  const numSteps = Number(widgetValue(node, "num_steps") || 0);
+  const existing = node.widgets.filter((w) => /^🎲 Step \d+$/.test(w.name));
+  const existingNames = new Set(existing.map((w) => w.name));
+  for (const w of [...existing]) {
+    const n = parseInt(w.name.replace("🎲 Step ", ""), 10);
+    if (n > numSteps) {
+      const idx = node.widgets.indexOf(w);
+      if (idx >= 0) node.widgets.splice(idx, 1);
+    }
+  }
+  for (let i = 1; i <= numSteps; i++) {
+    if (!existingNames.has(`🎲 Step ${i}`)) {
+      node.addWidget("toggle", `🎲 Step ${i}`, false, null, { serialize: false });
+    }
+  }
+}
+
+function removeStepDropdowns(node) {
+  const names = node.widgets.map((w) => w.name).filter((n) => /^Step \d+$/.test(n));
+  for (const name of names) {
+    const idx = node.widgets.findIndex((w) => w.name === name);
+    if (idx >= 0) node.widgets.splice(idx, 1);
+  }
+}
+
 async function addStep(node, step) {
   const chosen = currentChoices(node);
   let options;
@@ -86,14 +123,14 @@ async function addStep(node, step) {
     return;
   }
 
-  node.addWidget(
+  const combo = node.addWidget(
     "combo",
     `Step ${step}`,
     "",
     async (value) => {
       if (!value) return;
       appendChoice(node, value);
-      node.graph?.setDirtyCanvas(true, true);
+      updateProgress(node);
       const numSteps = Number(widgetValue(node, "num_steps") || 0);
       if (step < numSteps) {
         await addStep(node, step + 1);
@@ -103,6 +140,14 @@ async function addStep(node, step) {
     },
     { serialize: false, values: ["", ...options] }
   );
+
+  // auto-pick a random option if this step's random checkbox is checked
+  const rand = getWidget(node, `🎲 Step ${step}`);
+  if (rand && rand.value) {
+    const pick = options[Math.floor(Math.random() * options.length)];
+    combo.value = pick;
+    await combo.callback(pick);
+  }
   node.graph?.setDirtyCanvas(true, true);
 }
 
@@ -116,6 +161,12 @@ app.registerExtension({
       const result = onNodeCreated?.apply(this, args);
 
       try {
+        // always-visible progress line
+        this.addWidget("string", "📊 Progress", "", null, { serialize: false });
+        // always-visible random toggles, one per step
+        syncRandomToggles(this);
+        updateProgress(this);
+
         this.addWidget(
           "button",
           "🎲 Start",
@@ -126,24 +177,18 @@ app.registerExtension({
               notify("Enter a prompt first.", "warn");
               return;
             }
-            // clear previous run
+            // reset previous run (keep the random toggles)
             const choices = getWidget(this, "choices");
             if (choices) choices.value = "";
-            // drop any old step dropdowns
-            const stepNames = this.widgets
-              .filter((w) => /^Step \d+$/.test(w.name))
-              .map((w) => w.name);
-            for (const name of stepNames) {
-              const idx = this.widgets.findIndex((w) => w.name === name);
-              if (idx >= 0) this.widgets.splice(idx, 1);
-            }
-            this.setSize?.(this.computeSize?.());
+            removeStepDropdowns(this);
+            syncRandomToggles(this);
+            updateProgress(this);
             await addStep(this, 1);
           },
           { serialize: false }
         );
       } catch (error) {
-        console.error(`[${EXT}] Could not add Start button:`, error);
+        console.error(`[${EXT}] Could not init builder UI:`, error);
       }
 
       return result;
