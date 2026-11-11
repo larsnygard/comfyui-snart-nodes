@@ -222,9 +222,29 @@ class SnartPromptBuilder:
         picks = [c for c in (choices or "").splitlines() if c.strip()]
         if not prompt and not picks:
             return ("",)
-        if prompt and picks:
-            return (f"{prompt}. {', '.join(picks)}.",)
-        return (prompt or ", ".join(picks),)
+        if not picks:
+            return (prompt,)
+
+        # Synthesize the step choices into one coherent description (not a
+        # verbatim concatenation). Later steps refine earlier ones, so the
+        # result builds on the last choice.
+        llm = _client(llm_backend, api_endpoint, model_name, temperature)
+        system = (
+            "You combine step-by-step prompt-building choices into ONE coherent, "
+            "flowing description. Remove repetition and redundancy. "
+            "Output only the description - no preamble, no list, no markdown."
+        )
+        user = (
+            f"Original idea: \"{prompt}\"\n\n"
+            f"Choices made step by step (later steps refine earlier ones):\n"
+            + "\n".join(f"- {p}" for p in picks)
+            + "\n\nWrite a single coherent description that weaves these together without repeating."
+        )
+        resp = llm.send_prompt(system, user, max_tokens=500)
+        if resp.get("success") and (resp.get("response") or "").strip():
+            return (_clean(resp.get("response") or ""),)
+        # fallback: prompt + the last (most refined) choice
+        return (f"{prompt}. {picks[-1]}",)
 
 
 _NEGATIVE_PLATFORMS = {"sd_xl", "sd_1_5", "pony", "illustrious", "noobai"}

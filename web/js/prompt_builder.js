@@ -2,9 +2,9 @@
  * Expanding dropdowns for the Snart Prompt Builder.
  *
  * - A persistent "📊 Progress" line shows how many steps are chosen.
- * - A "🎲 Step N" checkbox sits beside each step: when checked, that step
- *   auto-picks a random option as soon as it is populated (and cascades on).
- * - 🎲 Start fetches step 1; picking a step reveals the next dropdown.
+ * - Each step gets a "🎲 Step N" checkbox right above its dropdown: when
+ *   checked, that step auto-picks a random option as soon as it is populated.
+ * - 🎲 Start fetches step 1; picking a step reveals the next one.
  */
 
 import { app } from "../../../scripts/app.js";
@@ -82,27 +82,10 @@ function updateProgress(node) {
   node.graph?.setDirtyCanvas(true, true);
 }
 
-// keep the 🎲 Step N checkboxes in sync with num_steps (preserving their values)
-function syncRandomToggles(node) {
-  const numSteps = Number(widgetValue(node, "num_steps") || 0);
-  const existing = node.widgets.filter((w) => /^🎲 Step \d+$/.test(w.name));
-  const existingNames = new Set(existing.map((w) => w.name));
-  for (const w of [...existing]) {
-    const n = parseInt(w.name.replace("🎲 Step ", ""), 10);
-    if (n > numSteps) {
-      const idx = node.widgets.indexOf(w);
-      if (idx >= 0) node.widgets.splice(idx, 1);
-    }
-  }
-  for (let i = 1; i <= numSteps; i++) {
-    if (!existingNames.has(`🎲 Step ${i}`)) {
-      node.addWidget("toggle", `🎲 Step ${i}`, false, null, { serialize: false });
-    }
-  }
-}
-
-function removeStepDropdowns(node) {
-  const names = node.widgets.map((w) => w.name).filter((n) => /^Step \d+$/.test(n));
+function removeStepWidgets(node) {
+  const names = node.widgets
+    .map((w) => w.name)
+    .filter((n) => /^Step \d+$/.test(n) || /^🎲 Step \d+$/.test(n));
   for (const name of names) {
     const idx = node.widgets.findIndex((w) => w.name === name);
     if (idx >= 0) node.widgets.splice(idx, 1);
@@ -110,6 +93,9 @@ function removeStepDropdowns(node) {
 }
 
 async function addStep(node, step) {
+  // checkbox first, so it sits adjacent to (above) the dropdown it controls
+  const toggle = node.addWidget("toggle", `🎲 Step ${step}`, false, null, { serialize: false });
+
   const chosen = currentChoices(node);
   let options;
   try {
@@ -141,9 +127,8 @@ async function addStep(node, step) {
     { serialize: false, values: ["", ...options] }
   );
 
-  // auto-pick a random option if this step's random checkbox is checked
-  const rand = getWidget(node, `🎲 Step ${step}`);
-  if (rand && rand.value) {
+  // auto-pick a random option if this step's checkbox is checked
+  if (toggle.value) {
     const pick = options[Math.floor(Math.random() * options.length)];
     combo.value = pick;
     await combo.callback(pick);
@@ -163,8 +148,6 @@ app.registerExtension({
       try {
         // always-visible progress line
         this.addWidget("string", "📊 Progress", "", null, { serialize: false });
-        // always-visible random toggles, one per step
-        syncRandomToggles(this);
         updateProgress(this);
 
         this.addWidget(
@@ -177,11 +160,9 @@ app.registerExtension({
               notify("Enter a prompt first.", "warn");
               return;
             }
-            // reset previous run (keep the random toggles)
             const choices = getWidget(this, "choices");
             if (choices) choices.value = "";
-            removeStepDropdowns(this);
-            syncRandomToggles(this);
+            removeStepWidgets(this);
             updateProgress(this);
             await addStep(this, 1);
           },
