@@ -116,6 +116,9 @@ class SnartStagedPrompter:
                 "api_endpoint": ("STRING", {"default": "http://localhost:1234/v1"}),
                 "model_name": ("STRING", {"default": "", "placeholder": "blank = auto-detect"}),
                 "temperature": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 2.0, "step": 0.05}),
+            },
+            "optional": {
+                "choice": ([""], {"default": "", "tooltip": "Pick an option here, then click Suggest again to add it and get the next step's options."}),
             }
         }
 
@@ -125,7 +128,7 @@ class SnartStagedPrompter:
     CATEGORY = "Snart"
 
     def run(self, prompt, num_suggestions, num_steps, broadness, random, random_seed,
-            choices, llm_backend, api_endpoint, model_name, temperature) -> Tuple[str, str]:
+            choices, llm_backend, api_endpoint, model_name, temperature, choice=None) -> Tuple[str, str]:
         prompt = (prompt or "").strip()
         if not prompt:
             return ("", "ERROR: no prompt")

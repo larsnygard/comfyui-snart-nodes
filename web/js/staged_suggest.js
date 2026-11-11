@@ -1,13 +1,12 @@
 /**
- * "Suggest" button + dropdown for the Snart Staged Prompt Builder.
+ * "Suggest" button for the Snart Staged Prompt Builder.
  *
- * Clicking Suggest asks the backend (/snart/staged/suggest) for the next step's
- * options and populates the "choice" dropdown. Picking from the dropdown appends
- * the choice to the node's "choices" widget. Repeat per step, then run the node
- * to write the final prompt.
- *
- * All UI additions are wrapped in try/catch so a frontend hiccup can never stop
- * the node from being placed in a workflow.
+ * The "choice" dropdown is a normal node input (declared in INPUT_TYPES), so the
+ * frontend's standard combo mechanism drives it. Clicking Suggest:
+ *   1. appends the current "choice" pick to "choices",
+ *   2. asks the backend (/snart/staged/suggest) for the next step's options,
+ *   3. repopulates the "choice" dropdown with them.
+ * Repeat per step, then run the node to write the final prompt.
  */
 
 import { app } from "../../../scripts/app.js";
@@ -44,58 +43,50 @@ app.registerExtension({
     nodeType.prototype.onNodeCreated = function (...args) {
       const result = onNodeCreated?.apply(this, args);
       try {
-        addSuggestUI(this);
+        addSuggestButton(this);
       } catch (error) {
-        console.error(`[${EXT}] Could not add Suggest UI:`, error);
+        console.error(`[${EXT}] Could not add Suggest button:`, error);
       }
       return result;
     };
   },
 });
 
-function addSuggestUI(node) {
-  // dropdown the Suggest button populates
-  const choice = node.addWidget(
-    "combo",
-    "choice",
-    "",
-    (value) => {
-      if (!value) return;
-      const choices = getWidget(node, "choices");
-      if (choices) {
-        const lines = String(choices.value ?? "")
-          .split("\n")
-          .map((l) => l.trim())
-          .filter(Boolean);
-        lines.push(String(value));
-        choices.value = lines.join("\n");
-        node.graph?.setDirtyCanvas(true, true);
-      }
-    },
-    { serialize: false, values: [""] }
-  );
-  choice.options = choice.options || {};
-  choice.options.values = choice.options.values || [""];
-
-  // Suggest button
+function addSuggestButton(node) {
   node.addWidget(
     "button",
     "🎲 Suggest",
     null,
     async () => {
-      const prompt = widgetValue(node, "prompt");
-      if (!prompt) {
-        notify("Enter a prompt first.", "warn");
-        return;
+      const choice = getWidget(node, "choice");
+      const choices = getWidget(node, "choices");
+
+      // 1. append the current pick (if any) to choices
+      const curChoice = choice ? String(choice.value ?? "").trim() : "";
+      if (curChoice) {
+        const lines = String(choices?.value ?? "")
+          .split("\n")
+          .map((l) => l.trim())
+          .filter(Boolean);
+        if (!lines.includes(curChoice)) lines.push(curChoice);
+        if (choices) choices.value = lines.join("\n");
       }
-      const numSteps = Number(widgetValue(node, "num_steps") || 0);
-      const chosen = String(widgetValue(node, "choices"))
+
+      const chosen = String(choices?.value ?? "")
         .split("\n")
         .map((l) => l.trim())
         .filter(Boolean);
+      const numSteps = Number(widgetValue(node, "num_steps") || 0);
       const step = chosen.length + 1;
+
       if (numSteps > 0 && step > numSteps) {
         notify(`All ${numSteps} steps chosen - run the node for the final prompt.`, "warn");
+        return;
+      }
+
+      const prompt = widgetValue(node, "prompt");
+      if (!prompt) {
+        notify("Enter a prompt first.", "warn");
         return;
       }
 
@@ -130,9 +121,12 @@ function addSuggestUI(node) {
         return;
       }
 
-      choice.options = choice.options || {};
-      choice.options.values = ["", ...data.options];
-      choice.value = "";
+      // 2. repopulate the choice dropdown
+      if (choice) {
+        choice.options = choice.options || {};
+        choice.options.values = ["", ...data.options];
+        choice.value = "";
+      }
       node.graph?.setDirtyCanvas(true, true);
     },
     { serialize: false }
