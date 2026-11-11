@@ -29,6 +29,19 @@ function notify(message, severity = "info") {
   }
 }
 
+function resolveAlternations(text) {
+  let result = String(text ?? "");
+  let guard = 0;
+  while (/\{[^{}]+\}/.test(result) && guard < 20) {
+    result = result.replace(/\{([^{}]+)\}/g, (m, inner) => {
+      const opts = inner.split("|").map((s) => s.trim()).filter(Boolean);
+      return opts.length ? opts[Math.floor(Math.random() * opts.length)] : m;
+    });
+    guard++;
+  }
+  return result;
+}
+
 async function fetchOptions(node, step, chosen) {
   const payload = {
     prompt: widgetValue(node, "prompt"),
@@ -194,13 +207,23 @@ app.registerExtension({
           "🎲 Start",
           null,
           async () => {
-            const prompt = widgetValue(this, "prompt");
-            if (!prompt) {
+            if (!widgetValue(this, "prompt")) {
               notify("Enter a prompt first.", "warn");
               return;
             }
+            // resolve {a|b|c} variations in the prompt
+            const promptWidget = getWidget(this, "prompt");
+            if (promptWidget) promptWidget.value = resolveAlternations(promptWidget.value);
+            // clear previous run: choices + step dropdown values/options
             const choices = getWidget(this, "choices");
             if (choices) choices.value = "";
+            for (const w of this.widgets) {
+              if (/^Step \d+$/.test(w.name)) {
+                w.value = "";
+                w.options = w.options || {};
+                w.options.values = [""];
+              }
+            }
             updateProgress(this);
             await populateStep(this, 1);
           },

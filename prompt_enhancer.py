@@ -191,6 +191,20 @@ _PLATFORM_GUIDANCE = {
 }
 
 
+def _process_alternations(text: str) -> str:
+    """Replace {a|b|c} with one of a/b/c chosen at random (for variations)."""
+    pattern = re.compile(r"\{([^{}]+)\}")
+    def repl(match):
+        opts = [o.strip() for o in match.group(1).split("|") if o.strip()]
+        return _random.choice(opts) if opts else match.group(0)
+    for _ in range(10):
+        new = pattern.sub(repl, text)
+        if new == text:
+            break
+        text = new
+    return text
+
+
 class SnartPromptBuilder:
     """Expanding staged selector: each step's pick populates the next dropdown.
 
@@ -202,7 +216,8 @@ class SnartPromptBuilder:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "prompt": ("STRING", {"multiline": True, "default": "", "placeholder": "The basic idea, e.g. 'a fox'"}),
+                "autopilot": ("BOOLEAN", {"default": False, "tooltip": "Build the prompt automatically when the node runs (random option each step)."}),
+                "prompt": ("STRING", {"multiline": True, "default": "", "placeholder": "The basic idea, e.g. 'a {cat|dog} in a forest'. {a|b|c} inserts one option at random - run again for another variation."}),
                 "num_steps": ("INT", {"default": 3, "min": 1, "max": 8, "step": 1}),
                 "num_suggestions": ("INT", {"default": 2, "min": 1, "max": 8, "step": 1}),
                 "broadness": (["simple", "specific", "broad"], {"default": "simple"}),
@@ -219,19 +234,32 @@ class SnartPromptBuilder:
     FUNCTION = "build"
     CATEGORY = "Snart"
 
-    def build(self, prompt, num_steps, num_suggestions, broadness,
+    def build(self, autopilot, prompt, num_steps, num_suggestions, broadness,
               llm_backend, api_endpoint, model_name, temperature, choices):
         prompt = (prompt or "").strip()
-        picks = [c for c in (choices or "").splitlines() if c.strip()]
-        if not prompt and not picks:
+        if not prompt:
             return ("",)
+        llm = _client(llm_backend, api_endpoint, model_name, temperature)
+        prompt = _process_alternations(prompt)
+        picks = [c for c in (choices or "").splitlines() if c.strip()]
+
+        if autopilot:
+            # autonomous: run the staged flow, auto-picking a random option each step
+            chosen = []
+            for step in range(1, int(num_steps) + 1):
+                opts = suggest_options(llm, prompt, chosen, step, int(num_suggestions), broadness)
+                if not opts:
+                    break
+                pick = _random.choice(opts)
+                chosen.append(pick)
+            picks = chosen
+
         if not picks:
             return (prompt,)
 
         # Synthesize the step choices into one coherent description (not a
         # verbatim concatenation). Later steps refine earlier ones, so the
         # result builds on the last choice.
-        llm = _client(llm_backend, api_endpoint, model_name, temperature)
         system = (
             "You combine step-by-step prompt-building choices into ONE coherent, "
             "flowing description. Remove repetition and redundancy. "
