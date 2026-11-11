@@ -42,18 +42,21 @@ Create an empty latent with four modes:
 Dimensions are snapped to multiples of 8. Outputs `LATENT` plus the resolved
 `width`/`height`.
 
-### Prompt Enhancer — staged (`SnartStyleSuggester`, `SnartPromptEnhancer`)
+### Staged Prompt Builder (`SnartStagedPrompter`)
 
-Build a prompt in two LLM-driven steps, with no hardcoded style presets:
+Refine a prompt in steps with an LLM, then write the final prompt — no hardcoded
+style presets:
 
-1. **Style Suggester** — give it a prompt, it asks the LLM for a list of
-   distinct style / art directions to choose from.
-2. **Prompt Enhancer** — give it the prompt plus the style you picked (from
-   step 1 or your own words), it writes the final detailed prompt.
+- Set **num_suggestions** and **num_steps** (e.g. 2 suggestions × 3 steps).
+- Pick how broad each option is: **simple** (photograph / painting), **specific**
+  (lomo photography / aquarelle), or **broad** (a stunning National-Geographic
+  color photo / a watercolor by a four-year-old).
+- Click **🎲 Suggest** to fill the dropdown with the next step's options, pick
+  one, repeat — or tick **random** to auto-pick a random option each step.
+- The node combines your picks into the final detailed prompt.
 
-Works with any backend in `llm_backend`. API keys are read from `config.json`
-or an environment variable only — there is no `api_key` widget, so keys cannot
-leak into workflow or image metadata.
+Works with any backend in `llm_backend`. API keys come from `config.json` or an
+environment variable only — there is no `api_key` widget, so keys can't leak.
 
 ## LLM backends
 
