@@ -15,9 +15,13 @@ API keys are read from config.json / environment variables only - no api_key
 widget, so keys cannot leak.
 """
 
+import json
+import os
 import random as _random
 import re
 from typing import List, Optional, Tuple
+
+import folder_paths
 
 from .llm_backend import LLMBackend, get_backend_options, get_backend_tooltip
 
@@ -218,8 +222,44 @@ class SnartPromptBuilder:
         return (prompt or ", ".join(picks),)
 
 
+_NEGATIVE_PLATFORMS = {"sd_xl", "sd_1_5", "pony", "illustrious", "noobai"}
+
+
+def _parse_json(text: str):
+    text = (text or "").strip()
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.MULTILINE).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(text[start:end + 1])
+        except json.JSONDecodeError:
+            pass
+    raise RuntimeError("Could not parse JSON from the LLM response")
+
+
+def _available_embeddings(limit: int = 40) -> List[str]:
+    """Installed textual-inversion embedding names (without extension)."""
+    try:
+        names = folder_paths.get_filename_list("embeddings")
+    except Exception:
+        return []
+    result = []
+    for n in names:
+        stem = os.path.splitext(os.path.basename(str(n)))[0]
+        if stem and stem not in result:
+            result.append(stem)
+        if len(result) >= limit:
+            break
+    return result
+
+
 class SnartPromptEnhancer:
-    """Fine-tune a prompt for a target platform/model (SDXL, Flux, ...)."""
+    """Fine-tune a prompt for a target platform; also gives a negative prompt
+    (where the platform uses one) and can reference installed embeddings."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -228,6 +268,7 @@ class SnartPromptEnhancer:
                 "text": ("STRING", {"multiline": True, "default": "", "placeholder": "Text to enhance (e.g. from the Prompt Builder)."}),
                 "platform": (_PLATFORMS, {"default": "flux"}),
                 "extra_guidance": ("STRING", {"default": "", "placeholder": "Optional extra instruction, e.g. 'keep under 60 words'"}),
+                "embeddings": ("STRING", {"default": "", "placeholder": "Optional: embedding names to include (comma separated), or blank to let the LLM pick."}),
                 "llm_backend": (get_backend_options(), {"default": "kindi", "tooltip": get_backend_tooltip()}),
                 "api_endpoint": ("STRING", {"default": "http://localhost:1234/v1"}),
                 "model_name": ("STRING", {"default": "", "placeholder": "blank = auto-detect"}),
@@ -235,34 +276,58 @@ class SnartPromptEnhancer:
             }
         }
 
-    RETURN_TYPES = ("STRING", "STRING")
-    RETURN_NAMES = ("enhanced_prompt", "status")
+    RETURN_TYPES = ("STRING", "STRING", "STRING")
+    RETURN_NAMES = ("enhanced_prompt", "negative_prompt", "status")
     FUNCTION = "enhance"
     CATEGORY = "Snart"
 
-    def enhance(self, text, platform, extra_guidance, llm_backend, api_endpoint,
-                model_name, temperature):
+    def enhance(self, text, platform, extra_guidance, embeddings, llm_backend,
+                api_endpoint, model_name, temperature):
         text = (text or "").strip()
         if not text:
-            return ("", "ERROR: no text")
+            return ("", "", "ERROR: no text")
         guidance = _PLATFORM_GUIDANCE.get(platform, "Write a detailed image prompt.")
         extra = (extra_guidance or "").strip()
         extra_line = f"\nAdditional instruction: {extra}" if extra else ""
 
+        wants_negative = platform in _NEGATIVE_PLATFORMS
+        available = _available_embeddings()
+        forced = [e for e in (embeddings or "").replace(",", "\n").splitlines() if e.strip()]
+
+        emb_line = ""
+        if available:
+            emb_line = f"\nInstalled embeddings (reference by name if useful): {', '.join(available)}."
+        if forced:
+            emb_line += f"\nYou MUST include these embeddings in the prompt: {', '.join(forced)}."
+
         system = (
-            "You write image-generation prompts. "
-            "Output only the final prompt text - no preamble, no explanation, no markdown."
+            "You write image-generation prompts. Reply with ONLY a JSON object "
+            'of the form {"positive": "...", "negative": "..."}. No prose, no markdown.'
         )
         user = (
             f"Text to enhance:\n\"{text}\"\n\n"
-            f"Target platform: {platform}.\n{guidance}{extra_line}\n\n"
-            f"Write a single rich, detailed image prompt optimized for {platform}."
+            f"Target platform: {platform}.\n{guidance}{extra_line}{emb_line}\n\n"
+            f"Write the positive prompt optimized for {platform}."
         )
+        if wants_negative:
+            user += "\nAlso write a negative prompt (things to avoid: low quality, bad anatomy, artifacts, blur, duplicates, etc.)."
+        else:
+            user += f"\n{platform} does not use negative prompts - set \"negative\" to an empty string."
+
         llm = _client(llm_backend, api_endpoint, model_name, temperature)
-        resp = llm.send_prompt(system, user, max_tokens=800)
+        resp = llm.send_prompt(system, user, max_tokens=900)
         if not resp.get("success"):
-            return ("", f"ERROR: {resp.get('error')}")
-        return (_clean(resp.get("response", "")), "OK")
+            return ("", "", f"ERROR: {resp.get('error')}")
+        try:
+            data = _parse_json(resp.get("response", ""))
+            positive = str(data.get("positive") or "").strip()
+            negative = str(data.get("negative") or "").strip()
+        except Exception:
+            positive = _clean(resp.get("response", ""))
+            negative = ""
+        if not wants_negative:
+            negative = ""
+        return (positive, negative, "OK")
 
 
 NODE_CLASS_MAPPINGS = {
