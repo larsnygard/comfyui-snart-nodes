@@ -162,5 +162,116 @@ class SnartStagedPrompter:
         return (final, "\n".join(log))
 
 
-NODE_CLASS_MAPPINGS = {"SnartStagedPrompter": SnartStagedPrompter}
-NODE_DISPLAY_NAME_MAPPINGS = {"SnartStagedPrompter": "Staged Prompt Builder"}
+_PLATFORMS = ["flux", "sd_xl", "sd_1_5", "pony", "illustrious", "noobai", "qwen_image", "wan_image", "hunyuan", "pixart", "chroma"]
+
+_PLATFORM_GUIDANCE = {
+    "flux": "Flux understands natural language - write flowing descriptive sentences, avoid tag spam.",
+    "sd_xl": "SDXL works best with comma-separated tags; use terse tags and (emphasis:1.2) weights where useful.",
+    "sd_1_5": "SD1.5 uses comma-separated tags; include quality tags like 'masterpiece, best quality'.",
+    "pony": "Pony uses tags plus score tags; start with 'score_9, score_8_up, score_7_up'.",
+    "illustrious": "Illustrious uses tags; include rating/quality tags.",
+    "noobai": "NoobAI uses tags; include quality tags.",
+    "qwen_image": "Qwen-Image understands natural language - write descriptive prose.",
+    "wan_image": "Wan understands natural language - write descriptive prose.",
+    "hunyuan": "HunyuanDiT understands natural language.",
+    "pixart": "PixArt understands natural language.",
+    "chroma": "Chroma understands natural language.",
+}
+
+
+class SnartPromptBuilder:
+    """Expanding staged selector: each step's pick populates the next dropdown.
+
+    Click 🎲 Start to fetch step 1, then pick — the next step's dropdown appears
+    automatically. Outputs the accumulated text as-is, for an enhancer.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "prompt": ("STRING", {"multiline": True, "default": "", "placeholder": "The basic idea, e.g. 'a fox'"}),
+                "num_steps": ("INT", {"default": 3, "min": 1, "max": 8, "step": 1}),
+                "num_suggestions": ("INT", {"default": 2, "min": 1, "max": 8, "step": 1}),
+                "broadness": (["simple", "specific", "broad"], {"default": "simple"}),
+                "choices": ("STRING", {"multiline": True, "default": "", "placeholder": "Auto-filled as you pick each step."}),
+                "llm_backend": (get_backend_options(), {"default": "kindi", "tooltip": get_backend_tooltip()}),
+                "api_endpoint": ("STRING", {"default": "http://localhost:1234/v1"}),
+                "model_name": ("STRING", {"default": "", "placeholder": "blank = auto-detect"}),
+                "temperature": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 2.0, "step": 0.05}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("text",)
+    FUNCTION = "build"
+    CATEGORY = "Snart"
+
+    def build(self, prompt, num_steps, num_suggestions, broadness, choices,
+              llm_backend, api_endpoint, model_name, temperature):
+        prompt = (prompt or "").strip()
+        picks = [c for c in (choices or "").splitlines() if c.strip()]
+        if not prompt and not picks:
+            return ("",)
+        if prompt and picks:
+            return (f"{prompt}. {', '.join(picks)}.",)
+        return (prompt or ", ".join(picks),)
+
+
+class SnartPromptEnhancer:
+    """Fine-tune a prompt for a target platform/model (SDXL, Flux, ...)."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "text": ("STRING", {"multiline": True, "default": "", "placeholder": "Text to enhance (e.g. from the Prompt Builder)."}),
+                "platform": (_PLATFORMS, {"default": "flux"}),
+                "extra_guidance": ("STRING", {"default": "", "placeholder": "Optional extra instruction, e.g. 'keep under 60 words'"}),
+                "llm_backend": (get_backend_options(), {"default": "kindi", "tooltip": get_backend_tooltip()}),
+                "api_endpoint": ("STRING", {"default": "http://localhost:1234/v1"}),
+                "model_name": ("STRING", {"default": "", "placeholder": "blank = auto-detect"}),
+                "temperature": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 2.0, "step": 0.05}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING", "STRING")
+    RETURN_NAMES = ("enhanced_prompt", "status")
+    FUNCTION = "enhance"
+    CATEGORY = "Snart"
+
+    def enhance(self, text, platform, extra_guidance, llm_backend, api_endpoint,
+                model_name, temperature):
+        text = (text or "").strip()
+        if not text:
+            return ("", "ERROR: no text")
+        guidance = _PLATFORM_GUIDANCE.get(platform, "Write a detailed image prompt.")
+        extra = (extra_guidance or "").strip()
+        extra_line = f"\nAdditional instruction: {extra}" if extra else ""
+
+        system = (
+            "You write image-generation prompts. "
+            "Output only the final prompt text - no preamble, no explanation, no markdown."
+        )
+        user = (
+            f"Text to enhance:\n\"{text}\"\n\n"
+            f"Target platform: {platform}.\n{guidance}{extra_line}\n\n"
+            f"Write a single rich, detailed image prompt optimized for {platform}."
+        )
+        llm = _client(llm_backend, api_endpoint, model_name, temperature)
+        resp = llm.send_prompt(system, user, max_tokens=800)
+        if not resp.get("success"):
+            return ("", f"ERROR: {resp.get('error')}")
+        return (_clean(resp.get("response", "")), "OK")
+
+
+NODE_CLASS_MAPPINGS = {
+    "SnartStagedPrompter": SnartStagedPrompter,
+    "SnartPromptBuilder": SnartPromptBuilder,
+    "SnartPromptEnhancer": SnartPromptEnhancer,
+}
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "SnartStagedPrompter": "Staged Prompt Builder",
+    "SnartPromptBuilder": "Prompt Builder",
+    "SnartPromptEnhancer": "Prompt Enhancer",
+}

@@ -58,6 +58,17 @@ style presets:
 Works with any backend in `llm_backend`. API keys come from `config.json` or an
 environment variable only — there is no `api_key` widget, so keys can't leak.
 
+### Prompt Builder (`SnartPromptBuilder`) + Prompt Enhancer (`SnartPromptEnhancer`)
+
+A two-node pipeline:
+
+1. **Prompt Builder** — click **🎲 Start**, then pick from an expanding set of
+   dropdowns (one per step); each pick populates the next dropdown. Outputs the
+   accumulated text as-is.
+2. **Prompt Enhancer** — takes that text and fine-tunes it for a **target
+   platform** (flux, sd_xl, sd_1_5, pony, illustrious, noobai, qwen_image,
+   wan_image, hunyuan, pixart, chroma), with optional extra guidance.
+
 ## LLM backends
 
 The `llm` mode uses `llm_backend.py`, an OpenAI-compatible chat client. Local
