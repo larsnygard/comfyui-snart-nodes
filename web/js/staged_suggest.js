@@ -5,6 +5,9 @@
  * options and populates the "choice" dropdown. Picking from the dropdown appends
  * the choice to the node's "choices" widget. Repeat per step, then run the node
  * to write the final prompt.
+ *
+ * All UI additions are wrapped in try/catch so a frontend hiccup can never stop
+ * the node from being placed in a workflow.
  */
 
 import { app } from "../../../scripts/app.js";
@@ -40,91 +43,98 @@ app.registerExtension({
     const onNodeCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function (...args) {
       const result = onNodeCreated?.apply(this, args);
-
-      // dropdown the Suggest button populates
-      const choice = this.addWidget(
-        "combo",
-        "choice",
-        "",
-        (value) => {
-          if (!value) return;
-          const choices = getWidget(this, "choices");
-          if (choices) {
-            const lines = String(choices.value ?? "")
-              .split("\n")
-              .map((l) => l.trim())
-              .filter(Boolean);
-            lines.push(String(value));
-            choices.value = lines.join("\n");
-            this.graph?.setDirtyCanvas(true, true);
-          }
-        },
-        { serialize: false }
-      );
-      choice.options = choice.options || {};
-      choice.options.values = [""];
-
-      // Suggest button
-      this.addWidget(
-        "button",
-        "🎲 Suggest",
-        null,
-        async () => {
-          const prompt = widgetValue(this, "prompt");
-          if (!prompt) {
-            notify("Enter a prompt first.", "warn");
-            return;
-          }
-          const numSteps = Number(widgetValue(this, "num_steps") || 0);
-          const chosen = String(widgetValue(this, "choices"))
-            .split("\n")
-            .map((l) => l.trim())
-            .filter(Boolean);
-          const step = chosen.length + 1;
-          if (numSteps > 0 && step > numSteps) {
-            notify(`All ${numSteps} steps chosen - run the node for the final prompt.`, "warn");
-            return;
-          }
-
-          const payload = {
-            prompt,
-            chosen,
-            step,
-            num_suggestions: Number(widgetValue(this, "num_suggestions") || 2),
-            broadness: widgetValue(this, "broadness") || "simple",
-            llm_backend: widgetValue(this, "llm_backend"),
-            api_endpoint: widgetValue(this, "api_endpoint"),
-            model_name: widgetValue(this, "model_name"),
-            temperature: Number(widgetValue(this, "temperature") || 0.7),
-          };
-
-          let data;
-          try {
-            const resp = await api.fetchApi(ROUTE, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload),
-            });
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            data = await resp.json();
-          } catch (error) {
-            notify(`Suggest failed: ${error.message}`, "error");
-            return;
-          }
-
-          if (!data?.success || !data.options?.length) {
-            notify(data?.error || "No options returned.", "warn");
-            return;
-          }
-
-          choice.options.values = ["", ...data.options];
-          choice.value = "";
-          this.graph?.setDirtyCanvas(true, true);
-        },
-        { serialize: false }
-      );
-
+      try {
+        addSuggestUI(this);
+      } catch (error) {
+        console.error(`[${EXT}] Could not add Suggest UI:`, error);
+      }
       return result;
     };
   },
 });
+
+function addSuggestUI(node) {
+  // dropdown the Suggest button populates
+  const choice = node.addWidget(
+    "combo",
+    "choice",
+    "",
+    (value) => {
+      if (!value) return;
+      const choices = getWidget(node, "choices");
+      if (choices) {
+        const lines = String(choices.value ?? "")
+          .split("\n")
+          .map((l) => l.trim())
+          .filter(Boolean);
+        lines.push(String(value));
+        choices.value = lines.join("\n");
+        node.graph?.setDirtyCanvas(true, true);
+      }
+    },
+    { serialize: false, values: [""] }
+  );
+  choice.options = choice.options || {};
+  choice.options.values = choice.options.values || [""];
+
+  // Suggest button
+  node.addWidget(
+    "button",
+    "🎲 Suggest",
+    null,
+    async () => {
+      const prompt = widgetValue(node, "prompt");
+      if (!prompt) {
+        notify("Enter a prompt first.", "warn");
+        return;
+      }
+      const numSteps = Number(widgetValue(node, "num_steps") || 0);
+      const chosen = String(widgetValue(node, "choices"))
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
+      const step = chosen.length + 1;
+      if (numSteps > 0 && step > numSteps) {
+        notify(`All ${numSteps} steps chosen - run the node for the final prompt.`, "warn");
+        return;
+      }
+
+      const payload = {
+        prompt,
+        chosen,
+        step,
+        num_suggestions: Number(widgetValue(node, "num_suggestions") || 2),
+        broadness: widgetValue(node, "broadness") || "simple",
+        llm_backend: widgetValue(node, "llm_backend"),
+        api_endpoint: widgetValue(node, "api_endpoint"),
+        model_name: widgetValue(node, "model_name"),
+        temperature: Number(widgetValue(node, "temperature") || 0.7),
+      };
+
+      let data;
+      try {
+        const resp = await api.fetchApi(ROUTE, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        data = await resp.json();
+      } catch (error) {
+        notify(`Suggest failed: ${error.message}`, "error");
+        return;
+      }
+
+      if (!data?.success || !data.options?.length) {
+        notify(data?.error || "No options returned.", "warn");
+        return;
+      }
+
+      choice.options = choice.options || {};
+      choice.options.values = ["", ...data.options];
+      choice.value = "";
+      node.graph?.setDirtyCanvas(true, true);
+    },
+    { serialize: false }
+  );
+}
