@@ -1,10 +1,7 @@
 /**
- * Expanding dropdowns for the Snart Prompt Builder.
- *
- * - A persistent "📊 Progress" line shows how many steps are chosen.
- * - Each step gets a "🎲 Step N" checkbox right above its dropdown: when
- *   checked, that step auto-picks a random option as soon as it is populated.
- * - 🎲 Start fetches step 1; picking a step reveals the next one.
+ * Prompt Builder: all step dropdowns + random checkboxes are shown up front
+ * (one per num_steps), populated in sequence when you click 🎲 Start. The
+ * choices box sits below the step dropdowns. Changing num_steps rebuilds them.
  */
 
 import { app } from "../../../scripts/app.js";
@@ -92,10 +89,30 @@ function removeStepWidgets(node) {
   }
 }
 
-async function addStep(node, step) {
-  // checkbox first, so it sits adjacent to (above) the dropdown it controls
-  const toggle = node.addWidget("toggle", `🎲 Step ${step}`, false, null, { serialize: false });
+function moveChoicesToBottom(node) {
+  const idx = node.widgets.findIndex((w) => w.name === "choices");
+  if (idx >= 0) {
+    const [choices] = node.widgets.splice(idx, 1);
+    node.widgets.push(choices);
+  }
+}
 
+async function onStepPicked(node, step, value) {
+  if (!value) return;
+  // guard against double-trigger (programmatic value set + manual callback)
+  if (currentChoices(node).length >= step) return;
+  appendChoice(node, value);
+  updateProgress(node);
+  const numSteps = Number(widgetValue(node, "num_steps") || 0);
+  if (step < numSteps) {
+    await populateStep(node, step + 1);
+  } else {
+    notify("All steps done - connect the text output to an enhancer.", "success");
+  }
+}
+
+async function populateStep(node, step) {
+  const combo = getWidget(node, `Step ${step}`);
   const chosen = currentChoices(node);
   let options;
   try {
@@ -108,32 +125,55 @@ async function addStep(node, step) {
     notify("No options returned.", "warn");
     return;
   }
-
-  const combo = node.addWidget(
-    "combo",
-    `Step ${step}`,
-    "",
-    async (value) => {
-      if (!value) return;
-      appendChoice(node, value);
-      updateProgress(node);
-      const numSteps = Number(widgetValue(node, "num_steps") || 0);
-      if (step < numSteps) {
-        await addStep(node, step + 1);
-      } else {
-        notify("All steps done - connect the text output to an enhancer.", "success");
-      }
-    },
-    { serialize: false, values: ["", ...options] }
-  );
-
-  // auto-pick a random option if this step's checkbox is checked
-  if (toggle.value) {
-    const pick = options[Math.floor(Math.random() * options.length)];
-    combo.value = pick;
-    await combo.callback(pick);
+  if (combo) {
+    combo.options = combo.options || {};
+    combo.options.values = ["", ...options];
+    combo.value = "";
   }
   node.graph?.setDirtyCanvas(true, true);
+
+  const rand = getWidget(node, `🎲 Step ${step}`);
+  if (rand && rand.value) {
+    const pick = options[Math.floor(Math.random() * options.length)];
+    if (combo) combo.value = pick;
+    await onStepPicked(node, step, pick);
+  }
+}
+
+function rebuildSteps(node) {
+  removeStepWidgets(node);
+  const numSteps = Number(widgetValue(node, "num_steps") || 0);
+  for (let i = 1; i <= numSteps; i++) {
+    node.addWidget("toggle", `🎲 Step ${i}`, false, null, { serialize: false });
+    node.addWidget(
+      "combo",
+      `Step ${i}`,
+      "",
+      async (value) => {
+        if (value) await onStepPicked(node, i, value);
+      },
+      { serialize: false, values: [""] }
+    );
+  }
+  moveChoicesToBottom(node);
+  node.graph?.setDirtyCanvas(true, true);
+}
+
+function wireNumSteps(node) {
+  const w = getWidget(node, "num_steps");
+  if (!w || w._snartWired) return;
+  w._snartWired = true;
+  const orig = w.callback;
+  w.callback = function (value) {
+    if (orig) orig.apply(this, arguments);
+    setTimeout(() => {
+      try {
+        rebuildSteps(node);
+      } catch (error) {
+        console.error(`[${EXT}] rebuild failed:`, error);
+      }
+    }, 0);
+  };
 }
 
 app.registerExtension({
@@ -146,7 +186,6 @@ app.registerExtension({
       const result = onNodeCreated?.apply(this, args);
 
       try {
-        // always-visible progress line
         this.addWidget("string", "📊 Progress", "", null, { serialize: false });
         updateProgress(this);
 
@@ -162,12 +201,14 @@ app.registerExtension({
             }
             const choices = getWidget(this, "choices");
             if (choices) choices.value = "";
-            removeStepWidgets(this);
             updateProgress(this);
-            await addStep(this, 1);
+            await populateStep(this, 1);
           },
           { serialize: false }
         );
+
+        rebuildSteps(this);
+        wireNumSteps(this);
       } catch (error) {
         console.error(`[${EXT}] Could not init builder UI:`, error);
       }
