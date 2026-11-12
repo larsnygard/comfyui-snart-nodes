@@ -214,6 +214,28 @@ app.registerExtension({
             // resolve {a|b|c} variations in the prompt
             const promptWidget = getWidget(this, "prompt");
             if (promptWidget) promptWidget.value = resolveAlternations(promptWidget.value);
+            // fill [description] placeholders via the LLM
+            if (promptWidget && promptWidget.value.includes("[")) {
+              try {
+                const fillResp = await api.fetchApi("/snart/staged/fill", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    prompt: promptWidget.value,
+                    llm_backend: widgetValue(this, "llm_backend"),
+                    api_endpoint: widgetValue(this, "api_endpoint"),
+                    model_name: widgetValue(this, "model_name"),
+                    temperature: Number(widgetValue(this, "temperature") || 0.7),
+                  }),
+                });
+                if (fillResp.ok) {
+                  const fillData = await fillResp.json();
+                  if (fillData?.success && fillData.prompt) promptWidget.value = fillData.prompt;
+                }
+              } catch (error) {
+                console.error("[Snart] fill failed:", error);
+              }
+            }
             // clear previous run: choices + step dropdown values/options
             const choices = getWidget(this, "choices");
             if (choices) choices.value = "";

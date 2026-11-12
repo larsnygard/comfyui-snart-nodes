@@ -205,6 +205,26 @@ def _process_alternations(text: str) -> str:
     return text
 
 
+def fill_brackets(llm, text: str) -> str:
+    """Replace [description] placeholders with concrete values the LLM picks."""
+    text = (text or "").strip()
+    if "[" not in text:
+        return text
+    system = (
+        "You fill in bracketed placeholders in an image prompt. Replace each "
+        "[description] with one concrete, fitting value. Output only the filled "
+        "prompt - no preamble, no list, no markdown."
+    )
+    user = (
+        f"Prompt with placeholders:\n\"{text}\"\n\n"
+        f"Replace each [..] placeholder with a single concrete choice and return the filled prompt."
+    )
+    resp = llm.send_prompt(system, user, max_tokens=400)
+    if resp.get("success") and (resp.get("response") or "").strip():
+        return _clean(resp.get("response") or "")
+    return text
+
+
 class SnartPromptBuilder:
     """Expanding staged selector: each step's pick populates the next dropdown.
 
@@ -241,6 +261,7 @@ class SnartPromptBuilder:
             return ("",)
         llm = _client(llm_backend, api_endpoint, model_name, temperature)
         prompt = _process_alternations(prompt)
+        prompt = fill_brackets(llm, prompt)
         picks = [c for c in (choices or "").splitlines() if c.strip()]
 
         if autopilot:
