@@ -377,33 +377,39 @@ class SnartPromptEnhancer:
         if forced:
             emb_line += f"\nYou MUST include these embeddings in the prompt: {', '.join(forced)}."
 
-        system = (
-            "You write image-generation prompts. Reply with ONLY a JSON object "
-            'of the form {"positive": "...", "negative": "..."}. No prose, no markdown.'
+        llm = _client(llm_backend, api_endpoint, model_name, temperature)
+
+        # positive prompt (separate call so negative content cannot bleed in)
+        pos_system = (
+            "You write image-generation prompts. Output ONLY the positive prompt "
+            "text itself - no preamble, no explanation, no markdown, no negative "
+            "content, no 'avoid' list."
         )
-        user = (
+        pos_user = (
             f"Text to enhance:\n\"{text}\"\n\n"
             f"Target platform: {platform}.\n{guidance}{extra_line}{emb_line}\n\n"
             f"Write the positive prompt optimized for {platform}."
         )
-        if wants_negative:
-            user += "\nAlso write a negative prompt (things to avoid: low quality, bad anatomy, artifacts, blur, duplicates, etc.)."
-        else:
-            user += f"\n{platform} does not use negative prompts - set \"negative\" to an empty string."
-
-        llm = _client(llm_backend, api_endpoint, model_name, temperature)
-        resp = llm.send_prompt(system, user, max_tokens=900)
+        resp = llm.send_prompt(pos_system, pos_user, max_tokens=800)
         if not resp.get("success"):
             return ("", "", f"ERROR: {resp.get('error')}")
-        try:
-            data = _parse_json(resp.get("response", ""))
-            positive = str(data.get("positive") or "").strip()
-            negative = str(data.get("negative") or "").strip()
-        except Exception:
-            positive = _clean(resp.get("response", ""))
-            negative = ""
-        if not wants_negative:
-            negative = ""
+        positive = _clean(resp.get("response") or "")
+
+        # negative prompt (separate call, only where the platform uses one)
+        negative = ""
+        if wants_negative:
+            neg_system = (
+                "You write negative prompts for image generation. Output ONLY a "
+                "comma-separated list of things to avoid - no preamble, no markdown."
+            )
+            neg_user = (
+                f"Image: \"{text}\". Write a negative prompt for {platform} "
+                f"(low quality, bad anatomy, artifacts, blur, duplicates, etc.)."
+            )
+            nresp = llm.send_prompt(neg_system, neg_user, max_tokens=200)
+            if nresp.get("success"):
+                negative = _clean(nresp.get("response") or "")
+
         return (positive, negative, "OK")
 
 
